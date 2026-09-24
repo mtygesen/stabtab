@@ -112,5 +112,31 @@ class Tableau:
         if not 0 <= a < self.n_qubits:
             raise ValueError(f"Qubit idx {a} out of range [0..{self.n_qubits}]")
 
+    def __str__(self):
+        n = self.n_qubits
+        index_width = len(str(n - 1))
+        columns = [" ".join(f"{axis}_{j}" for j in range(n)) for axis in "xz"]
+        header = " │ ".join([" " * (n + index_width + 4), *columns, "r"]) + " │"
+        separator = "".join("┼" if char == "│" else "─" for char in header)
+        lines = [header, separator]
+        for i, row in enumerate(self.tableau[:2 * n].view(np.uint8)):
+            if i == n:
+                lines.append(separator)
+            row_type = "D" if i < n else "S"
+            label = f"{row_type}_{i % n:<{index_width}} {self._generator_string(row)}"
+            values = [
+                " ".join(f"{row[offset + j]:<{len(str(j)) + 2}}" for j in range(n))
+                for offset in (0, n)
+            ]
+            lines.append(" │ ".join([label, *values, str(row[-1])]) + " │")
+        return "\n".join([*lines, separator]) + "\n"
+
+    def _generator_string(self, row) -> str:
+        sign = "-" if row[-1] else "+"
+        return sign + "".join(
+            "IXZY"[int(x) + 2 * int(z)]
+            for x, z in zip(row[:self.n_qubits], row[self.n_qubits:2 * self.n_qubits])
+        )
+
     def __repr__(self):
         return str(self.tableau.view(np.uint8))
