@@ -112,6 +112,60 @@ class Tableau:
         if not 0 <= a < self.n_qubits:
             raise ValueError(f"Qubit idx {a} out of range [0..{self.n_qubits}]")
 
+    def to_statevector(self) -> np.ndarray:
+        n = self.n_qubits
+        if n > 16:
+            raise ValueError("Statevector display is limited to 16 qubits")
+        indices = np.arange(1 << n)
+
+        def apply_pauli(row, vector):
+            x, z = row[:n], row[n : 2 * n]
+            flips = sum(int(x[q]) << (n - q - 1) for q in range(n))
+            phases = np.full(
+                indices.size,
+                (-1 if row[-1] else 1) * 1j ** int(np.count_nonzero(x & z)),
+                dtype=complex,
+            )
+            for q in np.flatnonzero(z):
+                phases *= 1 - 2 * ((indices >> (n - int(q) - 1)) & 1)
+            result = np.empty_like(vector)
+            result[indices ^ flips] = phases * vector
+            return result
+
+        vector = np.zeros(indices.size, dtype=complex)
+        vector[0] = 1
+        for i in range(n):
+            projected = vector + apply_pauli(self.tableau[n + i], vector)
+            norm = np.linalg.norm(projected)
+            if norm < 1e-12:
+                vector = apply_pauli(self.tableau[i], vector)
+            else:
+                vector = projected / norm
+        first = vector[np.flatnonzero(np.abs(vector) > 1e-12)[0]]
+        return vector * (first.conjugate() / abs(first))
+
+    def print_state(self):
+        terms: list[str] = []
+        for basis, amplitude in enumerate(self.to_statevector()):
+            if abs(amplitude) < 1e-12:
+                continue
+            imaginary = abs(amplitude.real) < 1e-12
+            value = amplitude.imag if imaginary else amplitude.real
+            coefficient = "i" if imaginary else ""
+            sign = (
+                (" - " if value < 0 else " + ") if terms else ("-" if value < 0 else "")
+            )
+            terms.append(f"{sign}{coefficient}|{basis:0{self.n_qubits}b}⟩")
+        ket = "".join(terms)
+        exponent = len(terms).bit_length() - 1
+        factor = 1 << (exponent // 2)
+        if exponent % 2:
+            denominator = "√2" if factor == 1 else f"({factor}√2)"
+        else:
+            denominator = str(factor)
+        expression = ket if len(terms) == 1 else f"({ket}) / {denominator}"
+        print(f"|ψ⟩ = {expression}")
+
     def __str__(self):
         n = self.n_qubits
         index_width = len(str(n - 1))
@@ -119,7 +173,7 @@ class Tableau:
         header = " │ ".join([" " * (n + index_width + 4), *columns, "r"]) + " │"
         separator = "".join("┼" if char == "│" else "─" for char in header)
         lines = [header, separator]
-        for i, row in enumerate(self.tableau[:2 * n].view(np.uint8)):
+        for i, row in enumerate(self.tableau[: 2 * n].view(np.uint8)):
             if i == n:
                 lines.append(separator)
             row_type = "D" if i < n else "S"
@@ -135,7 +189,9 @@ class Tableau:
         sign = "-" if row[-1] else "+"
         return sign + "".join(
             "IXZY"[int(x) + 2 * int(z)]
-            for x, z in zip(row[:self.n_qubits], row[self.n_qubits:2 * self.n_qubits])
+            for x, z in zip(
+                row[: self.n_qubits], row[self.n_qubits : 2 * self.n_qubits]
+            )
         )
 
     def __repr__(self):
